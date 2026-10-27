@@ -45,7 +45,7 @@
       <div class="overlay" id="overlay">
         <div class="overlay-box">
           <h2 id="overlay-title">Ready to run?</h2>
-          <p id="overlay-text">Jump over the cacti and see how long you can survive.</p>
+          <p id="overlay-text">Jump over the cacti and listen for jump, score and crash sounds.</p>
           <button id="start">Start game</button>
         </div>
       </div>
@@ -77,19 +77,49 @@
   try { best = Number(localStorage.getItem('dinoDashBest') || 0); } catch (_) {}
   bestEl.textContent = format(best);
 
+  let audioCtx = null, lastMilestone = 0;
+  function initAudio() {
+    if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  // Browser-generated sound effects: no external audio files required.
+  function tone(freq, duration, type = 'sine', volume = 0.04, slide = 0) {
+    initAudio(); if (!audioCtx) return;
+    const t = audioCtx.currentTime, osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, t);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), t + duration);
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(volume, t + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(gain); gain.connect(audioCtx.destination); osc.start(t); osc.stop(t + duration + 0.02);
+  }
+  function jumpSound() { tone(430, 0.11, 'square', 0.035, 360); }
+  function scoreSound() { tone(660, 0.08, 'sine', 0.035, 220); setTimeout(() => tone(880, 0.1, 'sine', 0.03, 100), 65); }
+  function crashSound() {
+    initAudio(); if (!audioCtx) return;
+    const t = audioCtx.currentTime, duration = 0.22, size = Math.floor(audioCtx.sampleRate * duration);
+    const buffer = audioCtx.createBuffer(1, size, audioCtx.sampleRate), data = buffer.getChannelData(0);
+    for (let i = 0; i < size; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / size);
+    const source = audioCtx.createBufferSource(), gain = audioCtx.createGain(), filter = audioCtx.createBiquadFilter();
+    source.buffer = buffer; filter.type = 'lowpass'; filter.frequency.value = 900;
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.linearRampToValueAtTime(0.14, t + 0.015); gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    source.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination); source.start(t);
+    tone(180, 0.25, 'sawtooth', 0.045, -120);
+  }
   function format(n) { return String(Math.floor(n)).padStart(5, '0'); }
   function reset() {
-    score = 0; speed = 6; spawnTimer = 45; obstacles = []; groundOffset = 0;
+    score = 0; speed = 6; spawnTimer = 45; obstacles = []; groundOffset = 0; lastMilestone = 0;
     dino.y = groundY - dino.h; dino.vy = 0; dino.grounded = true;
     scoreEl.textContent = format(score);
   }
   function start() {
+    initAudio();
     cancelAnimationFrame(animationId);
     reset(); state = 'running'; overlay.classList.add('hidden'); lastTime = performance.now();
     animationId = requestAnimationFrame(loop);
   }
   function endGame() {
     state = 'over';
+    crashSound();
     if (score > best) {
       best = score; bestEl.textContent = format(best);
       try { localStorage.setItem('dinoDashBest', String(best)); } catch (_) {}
@@ -104,7 +134,7 @@
       if (state === 'ready' || state === 'over') start();
       return;
     }
-    if (dino.grounded) { dino.vy = -14.2; dino.grounded = false; }
+    if (dino.grounded) { dino.vy = -14.2; dino.grounded = false; jumpSound(); }
   }
   function spawnObstacle() {
     const tall = Math.random() < .28;
@@ -180,6 +210,8 @@
       }
     }
     score += .12*dt;
+    const milestone = Math.floor(score / 100);
+    if (milestone > lastMilestone) { lastMilestone = milestone; scoreSound(); }
     scoreEl.textContent = format(score);
     if (Math.floor(score) > best) bestEl.textContent = format(score);
     draw();
